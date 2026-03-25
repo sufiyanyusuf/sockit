@@ -30,11 +30,11 @@ struct PerformanceTests {
             channel: "user:self"
         )
 
-        let start = CFAbsoluteTimeGetCurrent()
+        let start = Date().timeIntervalSinceReferenceDate
         for _ in 0..<10_000 {
             _ = try encoder.encode(message)
         }
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        let elapsed = Date().timeIntervalSinceReferenceDate - start
 
         let msgsPerSec = 10_000 / elapsed
         print("Encode: \(Int(msgsPerSec)) msgs/sec, \(elapsed * 100) ms total")
@@ -50,11 +50,11 @@ struct PerformanceTests {
         {"event":"home.get_today","payload":{"userId":"user-123","date":"2024-01-14","count":42},"requestId":"req-12345","channel":"user:self"}
         """.data(using: .utf8)!
 
-        let start = CFAbsoluteTimeGetCurrent()
+        let start = Date().timeIntervalSinceReferenceDate
         for _ in 0..<10_000 {
             _ = try decoder.decode(SockitMessage.self, from: json)
         }
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        let elapsed = Date().timeIntervalSinceReferenceDate - start
 
         let msgsPerSec = 10_000 / elapsed
         print("Decode: \(Int(msgsPerSec)) msgs/sec, \(elapsed * 100) ms total")
@@ -67,20 +67,20 @@ struct PerformanceTests {
         let message = SockitMessage(event: "test", requestId: "1")
 
         // New encoder each time (current implementation)
-        let start1 = CFAbsoluteTimeGetCurrent()
+        let start1 = Date().timeIntervalSinceReferenceDate
         for _ in 0..<5_000 {
             let encoder = JSONEncoder()
             _ = try encoder.encode(message)
         }
-        let newEncoderTime = CFAbsoluteTimeGetCurrent() - start1
+        let newEncoderTime = Date().timeIntervalSinceReferenceDate - start1
 
         // Reused encoder
         let encoder = JSONEncoder()
-        let start2 = CFAbsoluteTimeGetCurrent()
+        let start2 = Date().timeIntervalSinceReferenceDate
         for _ in 0..<5_000 {
             _ = try encoder.encode(message)
         }
-        let reusedEncoderTime = CFAbsoluteTimeGetCurrent() - start2
+        let reusedEncoderTime = Date().timeIntervalSinceReferenceDate - start2
 
         let speedup = newEncoderTime / reusedEncoderTime
         print("Encoder reuse speedup: \(String(format: "%.2f", speedup))x")
@@ -101,12 +101,12 @@ struct PerformanceTests {
 
         let decoder = JSONDecoder()
 
-        let start = CFAbsoluteTimeGetCurrent()
+        let start = Date().timeIntervalSinceReferenceDate
         for _ in 0..<10_000 {
             let message = try decoder.decode(SockitMessage.self, from: json)
             _ = try message.decodePayload(BenchPayload.self)
         }
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        let elapsed = Date().timeIntervalSinceReferenceDate - start
 
         let opsPerSec = 10_000 / elapsed
         print("Typed payload decode: \(Int(opsPerSec)) ops/sec")
@@ -118,7 +118,7 @@ struct PerformanceTests {
 
     @Test("benchmark: message creation allocations")
     func benchmarkMessageCreation() throws {
-        let start = CFAbsoluteTimeGetCurrent()
+        let start = Date().timeIntervalSinceReferenceDate
 
         for i in 0..<10_000 {
             let _ = try SockitMessage(
@@ -129,7 +129,7 @@ struct PerformanceTests {
             )
         }
 
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        let elapsed = Date().timeIntervalSinceReferenceDate - start
         let msgsPerSec = 10_000 / elapsed
         print("Message creation: \(Int(msgsPerSec)) msgs/sec")
 

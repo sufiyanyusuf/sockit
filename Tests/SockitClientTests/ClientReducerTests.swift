@@ -309,7 +309,7 @@ struct ClientReducerChannelTests {
         var state = makeConnectedState()
         state.channels["user:self"] = .joining(joinRef: "1")
 
-        let effects = clientReducer(state: &state, action: .channelError("user:self", "unauthorized", "Not allowed"))
+        _ = clientReducer(state: &state, action: .channelError("user:self", "unauthorized", "Not allowed"))
 
         if case .error(let code, let message) = state.channels["user:self"] {
             #expect(code == "unauthorized")
@@ -514,7 +514,7 @@ struct ClientReducerMessageReceivedTests {
             channel: "user:self"
         )
 
-        let effects = clientReducer(state: &state, action: .transportMessageReceived(message))
+        _ = clientReducer(state: &state, action: .transportMessageReceived(message))
 
         #expect(state.channels["user:self"] == .joined(joinRef: "1"))
     }
@@ -578,7 +578,7 @@ struct ClientReducerReconnectionNoneStrategyTests {
         state.channels["user"] = .joined(joinRef: "1")
 
         // Server dies → transport disconnects
-        let effects = clientReducer(state: &state, action: .transportDisconnected(nil))
+        _ = clientReducer(state: &state, action: .transportDisconnected(nil))
 
         // With .none strategy, should go to .disconnected
         #expect(state.connection == .disconnected)
@@ -605,7 +605,7 @@ struct ClientReducerReconnectionNoneStrategyTests {
         #expect(state.connection == .disconnected)
 
         // 2. External reconnect (session state machine calls connect)
-        let connectEffects = clientReducer(state: &state, action: .connect(makeConfig(reconnectStrategy: .none)))
+        _ = clientReducer(state: &state, action: .connect(makeConfig(reconnectStrategy: .none)))
         #expect(state.connection == .connecting(attempt: 1))
 
         // 3. Transport connects

@@ -56,10 +56,18 @@ let package = Package(
         ),
         .testTarget(
             name: "SockitClientTests",
+            dependencies: ["SockitClient"]
+        ),
+        // Integration tests use NIO's HTTP pipeline API which contains types
+        // that don't conform to Sendable (NIO API limitation, not Sockit's).
+        // These run in Swift 5 language mode to avoid false positives.
+        .testTarget(
+            name: "SockitIntegrationTests",
             dependencies: [
                 "SockitClient",
                 "SockitNIOTransport",
-            ]
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "SockitServerTests",
