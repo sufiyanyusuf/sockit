@@ -1,3 +1,4 @@
+#if canImport(Darwin)
 import Foundation
 import SockitCore
 
@@ -96,3 +97,4 @@ public final class WebSocketTransport: TransportProtocol, @unchecked Sendable {
         }
     }
 }
+#endif
