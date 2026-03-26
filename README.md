@@ -308,7 +308,6 @@ try await client.connect(config: ClientConfig(
         maxDelay: 30.0,
         maxAttempts: 5
     ),
-    defaultTimeout: 30.0                   // Request timeout
 ))
 
 await client.disconnect()
@@ -551,7 +550,7 @@ Sources/
 
 ```bash
 swift build    # Build all targets
-swift test     # Run all 157 tests
+swift test     # Run all 174 tests
 ```
 
 Reducer tests are plain functions -- no server or connection needed:
