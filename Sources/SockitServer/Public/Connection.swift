@@ -2,6 +2,15 @@ import Foundation
 import SockitCore
 import Vapor
 
+/// Closure that validates whether a connection may join a channel.
+///
+/// Return `true` to allow the join, `false` to reject it.
+/// - Parameters:
+///   - channel: The channel name being joined
+///   - payloadData: Raw JSON payload sent with the join request
+///   - context: Handler context with connection and userId info
+public typealias JoinValidator = @Sendable (String, Data, HandlerContext) async throws -> Bool
+
 /// A single WebSocket connection managed by the server
 public actor Connection {
     public let id: UUID
@@ -9,19 +18,26 @@ public actor Connection {
     private let ws: WebSocket
     private let typedRouter: TypedRouter
     private let channelRegistry: ChannelRegistry
+    private let joinValidator: JoinValidator?
 
     /// Initialize with a TypedRouter for type-safe handler routing
+    ///
+    /// - Parameter joinValidator: Optional closure to validate channel joins.
+    ///   Receives the channel name, raw join payload data, and handler context.
+    ///   Return `true` to allow, `false` to reject. If `nil`, all joins are accepted.
     public init(
         id: UUID = UUID(),
         ws: WebSocket,
         typedRouter: TypedRouter,
         channelRegistry: ChannelRegistry,
-        userId: UUID? = nil
+        userId: UUID? = nil,
+        joinValidator: JoinValidator? = nil
     ) {
         self.id = id
         self.ws = ws
         self.typedRouter = typedRouter
         self.channelRegistry = channelRegistry
+        self.joinValidator = joinValidator
         self.state = ConnectionState(id: id, userId: userId)
     }
 
@@ -219,7 +235,29 @@ public actor Connection {
     }
 
     private func validateJoin(channel: String, payloadData: Data, requestId: String) async {
-        // For now, allow all joins - override for custom validation
+        // If a join validator is provided, let it decide
+        if let joinValidator = joinValidator {
+            let context = HandlerContext(connection: self, userId: state.userId)
+            do {
+                let allowed = try await joinValidator(channel, payloadData, context)
+                guard allowed else {
+                    let effects = connectionReducer(
+                        state: &state,
+                        action: .channelJoinFailed(channel, code: "join_rejected", message: "Join rejected by validator")
+                    )
+                    await execute(effects)
+                    return
+                }
+            } catch {
+                let effects = connectionReducer(
+                    state: &state,
+                    action: .channelJoinFailed(channel, code: "join_error", message: error.localizedDescription)
+                )
+                await execute(effects)
+                return
+            }
+        }
+
         let effects = connectionReducer(state: &state, action: .channelJoined(channel))
         await execute(effects)
 

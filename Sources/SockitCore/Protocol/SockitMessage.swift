@@ -186,11 +186,20 @@ extension SockitMessage {
     }
 
     /// Create a channel join request
-    public static func join(channel: String, requestId: String) -> SockitMessage {
-        let payload = ["topic": channel]
+    public static func join(channel: String, requestId: String, payloadData: Data = Data("{}".utf8)) -> SockitMessage {
+        // Merge the topic into the payload. If the caller provided custom payload,
+        // decode it, add "topic", and re-encode. Otherwise use {"topic": channel}.
+        let mergedPayload: Data
+        if var dict = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
+            dict["topic"] = channel
+            mergedPayload = (try? JSONSerialization.data(withJSONObject: dict)) ?? payloadData
+        } else {
+            let fallback = ["topic": channel]
+            mergedPayload = (try? JSONEncoder().encode(fallback)) ?? Data()
+        }
         return SockitMessage(
             event: "channel.join",
-            payloadData: (try? JSONEncoder().encode(payload)) ?? Data(),
+            payloadData: mergedPayload,
             requestId: requestId,
             channel: channel
         )

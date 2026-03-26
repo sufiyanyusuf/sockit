@@ -95,7 +95,8 @@ extension Application {
     public func sockit(
         path: PathComponent...,
         router: TypedRouter,
-        authenticate: @Sendable @escaping (Vapor.Request) async throws -> UUID? = { _ in nil }
+        authenticate: @Sendable @escaping (Vapor.Request) async throws -> UUID? = { _ in nil },
+        joinValidator: JoinValidator? = nil
     ) {
         let manager = self.connectionManager
         let registry = self.channelRegistry
@@ -111,21 +112,16 @@ extension Application {
             }
 
             Task {
-                // Authenticate
+                // Authenticate (nil userId = anonymous connection)
                 let userId = try? await authenticate(req)
-                guard let userId else {
-                    // Send error event before closing so the client knows why
-                    try? await ws.send(#"{"event":"auth.error","payload":{"code":"auth_failed","message":"Authentication required"}}"#)
-                    try? await ws.close()
-                    return
-                }
 
                 // Create connection
                 let connection = Connection(
                     ws: ws,
                     typedRouter: router,
                     channelRegistry: registry,
-                    userId: userId
+                    userId: userId,
+                    joinValidator: joinValidator
                 )
 
                 // Register

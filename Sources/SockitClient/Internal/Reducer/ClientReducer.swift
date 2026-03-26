@@ -101,6 +101,18 @@ private func handleTransportConnected(state: inout ClientState) -> [ClientEffect
 }
 
 private func handleTransportDisconnected(state: inout ClientState, error: Error?) -> [ClientEffect] {
+    // Carry forward the attempt number from the current state
+    let currentAttempt: Int
+    switch state.connection {
+    case .connecting(let attempt):
+        currentAttempt = attempt
+    case .reconnecting(let attempt, _):
+        currentAttempt = attempt
+    default:
+        currentAttempt = 0
+    }
+    let nextAttempt = max(currentAttempt, 1)
+
     // Clear pending requests
     let pendingIds = Array(state.pendingRequests.keys)
     state.pendingRequests.removeAll()
@@ -111,7 +123,7 @@ private func handleTransportDisconnected(state: inout ClientState, error: Error?
 
     // Check if we should reconnect
     guard let config = state.config,
-          let delay = config.reconnectStrategy.delay(forAttempt: 1) else {
+          let delay = config.reconnectStrategy.delay(forAttempt: nextAttempt) else {
         state.connection = .disconnected
         // Clear channels when going to disconnected — stale channel entries
         // cause rejoin to be silently dropped after external reconnect.
@@ -121,9 +133,9 @@ private func handleTransportDisconnected(state: inout ClientState, error: Error?
         return effects
     }
 
-    state.connection = .reconnecting(attempt: 1, lastError: error)
+    state.connection = .reconnecting(attempt: nextAttempt, lastError: error)
     effects.append(.scheduleReconnect(delay: delay))
-    effects.append(.emit(.connectionStateChanged(.reconnecting(attempt: 1))))
+    effects.append(.emit(.connectionStateChanged(.reconnecting(attempt: nextAttempt))))
 
     return effects
 }
@@ -171,7 +183,7 @@ private func handleJoinChannel(
     let joinRef = String(state.refCounter)
     state.channels[channel] = .joining(joinRef: joinRef)
 
-    let message = SockitMessage.join(channel: channel, requestId: joinRef)
+    let message = SockitMessage.join(channel: channel, requestId: joinRef, payloadData: payloadData)
 
     return [
         .sendMessage(message),

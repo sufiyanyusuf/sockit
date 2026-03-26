@@ -64,8 +64,9 @@ public actor Client {
         reconnectTask?.cancel()
         transportEventsTask?.cancel()
         timeoutTasks.values.forEach { $0.cancel() }
-        // Note: pendingTypedRequests continuations will be resumed with errors
-        // when the actor is deallocated and tasks are cancelled
+        for (_, continuation) in pendingTypedRequests {
+            continuation.resume(throwing: SockitError.disconnected)
+        }
     }
 
     // MARK: - Public API
@@ -92,6 +93,13 @@ public actor Client {
             heartbeatTask = nil
             reconnectTask?.cancel()
             reconnectTask = nil
+            // Resume any pending typed request continuations before clearing state
+            for (requestId, continuation) in pendingTypedRequests {
+                continuation.resume(throwing: SockitError.disconnected)
+                timeoutTasks[requestId]?.cancel()
+                timeoutTasks.removeValue(forKey: requestId)
+            }
+            pendingTypedRequests.removeAll()
             state.connection = .disconnected
             state.channels.removeAll()
             state.pendingRequests.removeAll()
@@ -260,12 +268,9 @@ public actor Client {
             jsonDict["channel"] = channel
         }
 
-        // Parse payload data to merge into message
-        if let payloadObj = try JSONSerialization.jsonObject(with: payloadData) as? [String: Any] {
-            jsonDict["payload"] = payloadObj
-        } else {
-            jsonDict["payload"] = [String: Any]()
-        }
+        // Parse payload data to merge into message (supports any valid JSON type)
+        let payloadObj = try JSONSerialization.jsonObject(with: payloadData)
+        jsonDict["payload"] = payloadObj
 
         return try JSONSerialization.data(withJSONObject: jsonDict)
     }
@@ -472,19 +477,21 @@ public actor Client {
         let status = json["status"] as? String
 
         // Payload IS the typed response data directly (no "data" wrapper)
-        let payload = json["payload"] as? [String: Any] ?? [:]
+        let payload: Any = json["payload"] ?? [String: Any]()
 
         // Check for error response
-        if status == "error", let errorDict = payload["error"] as? [String: Any] {
+        if status == "error",
+           let payloadDict = payload as? [String: Any],
+           let errorDict = payloadDict["error"] as? [String: Any] {
             let code = errorDict["code"] as? String ?? "unknown"
             let message = errorDict["message"] as? String ?? "Unknown error"
             continuation.resume(throwing: SockitError.serverError(code: code, message: message))
             return
         }
 
-        // Payload IS the data - serialize directly
+        // Payload IS the data - serialize directly (supports any valid JSON type including scalars)
         do {
-            let dataBytes = try JSONSerialization.data(withJSONObject: payload)
+            let dataBytes = try JSONSerialization.data(withJSONObject: payload, options: .fragmentsAllowed)
             continuation.resume(returning: dataBytes)
         } catch {
             continuation.resume(throwing: SockitError.invalidResponse)
