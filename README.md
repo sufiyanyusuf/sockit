@@ -6,15 +6,45 @@ A Swift WebSocket library with shared types between client and server, and a pur
 ![Platforms](https://img.shields.io/badge/Platforms-iOS%2017%2B%20%7C%20macOS%2014%2B%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Sockit gives you typed request/response over WebSockets -- define a command once, use the same DTOs on your iOS app and Vapor server. All the connection logic (reconnection, heartbeats, channels, timeouts) is separated from the network layer, so you can test your entire WebSocket state machine by calling a function and checking the result. No server, no connection, no async.
+Sockit gives you typed request/response over WebSockets -- define a command once, use the same types on your iOS app and Vapor server. All the connection logic (reconnection, heartbeats, channels, timeouts) is separated from the network layer, so you can test your entire WebSocket state machine by calling a function and checking the result. No server, no connection, no async.
 
 ```swift
-struct GetProfile: SockitCommand {
-    typealias Response = ProfileDTO
-    static let event = "profile.get"
+import SockitClient
+
+// Shared between iOS and Vapor — defined once
+enum Event {
+    static let generateReport = "report.ai.generate"
+    static let reportStreaming = "report.ai.partial"
+    static let reportDone = "report.ai.done"
+    static let reportError = "report.ai.error"
 }
 
-let profile = try await client.send(GetProfile()) // Typed. Done.
+// Kick off AI report generation over WebSocket
+let _ = try await client.send(GenerateReport(prompt: "Q4 sales summary"))
+
+// Stream results as they arrive from the server
+for await message in client.messages {
+    switch message {
+    case .rawPushEvent(let push):
+        switch push.event {
+        case Event.reportStreaming:
+            let partial = try push.decodePayload(ReportContent.self)
+            updateUI(partial)
+        case Event.reportDone:
+            let report = try push.decodePayload(Report.self)
+            showComplete(report)
+        case Event.reportError:
+            let error = try push.decodePayload(ReportError.self)
+            showError(error)
+        default:
+            break
+        }
+    case .connectionStateChanged(.disconnected):
+        showReconnecting()
+    default:
+        break
+    }
+}
 ```
 
 ## Why Sockit?
@@ -212,20 +242,21 @@ try await client.connect(config: ClientConfig(
 
 // Typed command -- send and await a decoded response
 struct GetProfile: SockitCommand {
-    typealias Response = ProfileDTO
-    static let event = "profile.get"
+    typealias Response = ProfileResponse
+    static let event = Event.getProfile
 }
 let profile = try await client.send(GetProfile())
 
 // Listen for events
 for await message in client.messages {
     switch message {
-    case .response(let response):
-        handleResponse(response)
     case .rawPushEvent(let push):
-        if push.event == "chat.message" {
+        switch push.event {
+        case Event.chatMessage:
             let msg = try push.decodePayload(ChatMessage.self)
             displayMessage(msg)
+        default:
+            break
         }
     case .connectionStateChanged(let change):
         updateUI(for: change) // .connecting, .connected, .reconnecting(attempt:), .disconnected
@@ -242,8 +273,8 @@ import Vapor
 import SockitServer
 
 struct GetProfileHandler: SockitHandlerNoPayload {
-    typealias Response = ProfileDTO
-    static let event = "profile.get"
+    typealias Response = ProfileResponse
+    static let event = Event.getProfile
 
     func handle(context: HandlerContext) async throws -> Response {
         try await fetchProfile(userId: context.userId!)
@@ -296,15 +327,15 @@ await client.disconnect()
 ```swift
 // Command with no payload
 struct GetProfile: SockitCommand {
-    typealias Response = ProfileDTO
-    static let event = "profile.get"
+    typealias Response = ProfileResponse
+    static let event = Event.getProfile
 }
 let profile = try await client.send(GetProfile())
 
 // Command with payload
 struct UpdateSettings: SockitCommandWithPayload {
-    typealias Response = SettingsDTO
-    static let event = "settings.update"
+    typealias Response = SettingsResponse
+    static let event = Event.updateSettings
 
     let theme: String
     let notifications: Bool
@@ -313,9 +344,9 @@ let settings = try await client.send(UpdateSettings(theme: "dark", notifications
 
 // Command scoped to a channel
 struct SendMessage: SockitCommandWithPayload {
-    typealias Response = MessageDTO
-    static let event = "chat.send"
-    var channel: String? { "room:general" }
+    typealias Response = MessageResponse
+    static let event = Event.sendMessage
+    var channel: String? { Channel.general }
 
     let text: String
 }
@@ -324,9 +355,9 @@ struct SendMessage: SockitCommandWithPayload {
 ### Channels
 
 ```swift
-await client.join("room:general")
-await client.join("room:general", payload: JoinParams(role: "member")) // With typed payload
-await client.leave("room:general")
+await client.join(Channel.general)
+await client.join(Channel.general, payload: JoinParams(role: "member")) // With typed payload
+await client.leave(Channel.general)
 ```
 
 ### Listening for Messages
@@ -365,7 +396,7 @@ Route server push events to typed handlers:
 ```swift
 struct ChatMessageEvent: SockitPushEvent {
     typealias Payload = ChatMessage
-    static let event = "chat.message"
+    static let event = Event.chatMessage
 }
 
 let registry = PushEventRegistry()
@@ -389,9 +420,9 @@ For high-throughput scenarios, decode only the events you need:
 ```swift
 case .rawPushEvent(let push):
     switch push.event {
-    case "chat.message":
+    case Event.chatMessage:
         let msg = try push.decodePayload(ChatMessage.self)
-    case "presence.update":
+    case Event.presenceUpdate:
         let update = try push.decodePayload(PresenceUpdate.self)
     default:
         break // No JSON parsing cost for unhandled events
@@ -413,7 +444,7 @@ case .rawPushEvent(let push):
 struct SendMessageHandler: SockitHandler {
     typealias Request = SendMessageRequest  // Decodable & Sendable
     typealias Response = SendMessageResponse // Encodable & Sendable
-    static let event = "chat.send"
+    static let event = Event.sendMessage
 
     func handle(request: Request, context: HandlerContext) async throws -> Response {
         let msg = try await saveMessage(from: context.userId!, text: request.text)
@@ -423,8 +454,8 @@ struct SendMessageHandler: SockitHandler {
 
 // Handler with no request payload
 struct GetTodayHandler: SockitHandlerNoPayload {
-    typealias Response = TodaySnapshotDTO
-    static let event = "home.get_today"
+    typealias Response = TodaySnapshot
+    static let event = Event.getToday
 
     func handle(context: HandlerContext) async throws -> Response {
         try await fetchTodaySnapshot(userId: context.userId!)
@@ -459,23 +490,23 @@ app.sockit(path: "socket", router: router) { req in
 
 ```swift
 // Push to a specific connection (e.g. inside a handler)
-try await context.connection.push(event: "chat.message", payload: chatMessage, channel: "room:general")
-await context.connection.push(event: "typing.started", channel: "room:general") // No payload
+try await context.connection.push(event: Event.chatMessage, payload: chatMessage, channel: Channel.general)
+await context.connection.push(event: Event.typingStarted, channel: Channel.general) // No payload
 
 // Push to a specific user (all their connections) -- from anywhere with access to app
-try await app.connectionManager.sendToUser(userId, event: "notification", payload: notification)
-await app.connectionManager.sendToUser(userId, event: "refresh")
+try await app.connectionManager.sendToUser(userId, event: Event.notification, payload: notification)
+await app.connectionManager.sendToUser(userId, event: Event.refresh)
 
 // Push to all subscribers of a channel
-let members = await app.channelRegistry.subscribers(for: "room:general")
+let members = await app.channelRegistry.subscribers(for: Channel.general)
 for connectionId in members {
     if let conn = await app.connectionManager.connection(for: connectionId) {
-        try await conn.push(event: "chat.message", payload: chatMessage, channel: "room:general")
+        try await conn.push(event: Event.chatMessage, payload: chatMessage, channel: Channel.general)
     }
 }
 
 // Broadcast to all connections
-try await app.connectionManager.broadcast(event: "system.maintenance", payload: maintenanceInfo)
+try await app.connectionManager.broadcast(event: Event.systemMaintenance, payload: maintenanceInfo)
 ```
 
 ### Shared DTOs
